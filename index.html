@@ -1,90 +1,458 @@
-// === 核心逻辑：本地缓存 + 异步刷新 ===
-    const CACHE_KEY = 'youshu_data_cache';
-    let currentActiveRowId = null; // 用于记录当前打开的物品的行号
-    let currentActiveItem = null;  // 记录当前打开的物品完整数据
-
-    async function loadData() {
-        const cachedData = localStorage.getItem(CACHE_KEY);
-        if (cachedData) {
-            const data = JSON.parse(cachedData);
-            renderItems(data);
-            calculateOverview(data);
-        } else {
-            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">首次加载，正在从云端同步...</div>';
-        }
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="有数">
+    <link rel="manifest" href="./manifest.json">
+    <title>我的有数</title>
+    <style>
+        /* 基础样式保持不变 */
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { background-color: #f5f6f8; color: #333; background-image: linear-gradient(180deg, #d8f5a2 0%, #f5f6f8 250px); background-repeat: no-repeat; display: flex; justify-content: center; }
+        .app-container { width: 100%; max-width: 480px; min-height: 100vh; position: relative; padding-bottom: 80px; }
+        header { padding: 20px 20px 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { font-size: 24px; font-weight: 800; }
+        .overview-card { background: #ffffff; border-radius: 20px; margin: 0 20px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); }
+        .overview-header { font-size: 14px; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center; }
+        .overview-header span.tag { background: #f0f0f0; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 8px; color: #666; }
+        .asset-data { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .data-item { flex: 1; }
+        .data-label { font-size: 12px; color: #888; margin-bottom: 5px; }
+        .data-value { font-size: 24px; font-weight: 800; }
+        .data-value small { font-size: 14px; margin-right: 2px; }
+        .status-bars { display: flex; gap: 10px; font-size: 11px; color: #999; }
+        .status-item { flex: 1; }
+        .bar { height: 4px; background: #f0f0f0; border-radius: 2px; margin-top: 5px; }
+        .bar.active { background: #a8e038; }
         
-        try {
-            const response = await fetch(API_URL);
-            const data = await response.json();
-            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
-            renderItems(data);
-            calculateOverview(data);
-        } catch (error) {
-            if (!cachedData) itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: red;">加载失败，请检查网络。</div>';
-        }
-    }
+        /* 分类标签区 (增加水平滚动支持) */
+        .category-tabs { padding: 20px; display: flex; gap: 20px; font-size: 15px; font-weight: bold; color: #888; overflow-x: auto; white-space: nowrap; }
+        .category-tabs::-webkit-scrollbar { display: none; }
+        .category-tabs div { cursor: pointer; padding-bottom: 2px; }
+        .category-tabs .active { color: #333; border-bottom: 3px solid #a8e038; }
 
-    const detailDrawer = document.getElementById('detail-drawer');
-    const drawerClose = document.getElementById('drawer-close');
-    drawerClose.addEventListener('click', () => detailDrawer.style.display = 'none');
+        .filter-tags { padding: 0 20px 10px 20px; display: flex; gap: 10px; overflow-x: auto; }
+        .filter-tags::-webkit-scrollbar { display: none; }
+        .filter-tag { background: #ffffff; padding: 6px 16px; border-radius: 20px; font-size: 13px; color: #666; white-space: nowrap; cursor: pointer; }
+        .filter-tag.active { background: #222; color: #fff; }
 
-    function renderItems(data) {
-        itemListContainer.innerHTML = '';
-        data.forEach(item => {
-            const days = calculateDays(item['购入日期']);
-            const price = parseFloat(item['购入价格']) || 0;
-            const dailyCost = price / days;
+        .item-list { padding: 10px 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .item-card { background: #ffffff; border-radius: 16px; padding: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); position: relative; cursor: pointer; }
+        .item-status-dot { position: absolute; top: 12px; right: 12px; font-size: 10px; padding: 2px 6px; border-radius: 8px; display: flex; align-items: center; gap: 4px; }
+        .item-status-dot::before { content: ""; display: block; width: 4px; height: 4px; border-radius: 50%; }
+        .status-active { background: #f4fbf0; color: #5ba12b; } .status-active::before { background: #5ba12b; }
+        .status-retired { background: #f5f5f5; color: #888888; } .status-retired::before { background: #888888; }
+        .status-sold { background: #fff7e6; color: #fa8c16; } .status-sold::before { background: #fa8c16; }
+        .item-icon { width: 40px; height: 40px; background: #f0f0f0; border-radius: 8px; margin-bottom: 10px; }
+        .item-name { font-size: 14px; font-weight: bold; margin-bottom: 4px; color: #222; }
+        .item-subtext { font-size: 11px; color: #999; margin-bottom: 15px; }
+        .item-daily-cost { font-size: 16px; font-weight: bold; }
+        .item-daily-cost small { font-size: 11px; color: #888; font-weight: normal; }
+
+        .bottom-nav { position: fixed; bottom: 0; width: 100%; max-width: 480px; background: #ffffff; height: 70px; border-radius: 30px 30px 0 0; box-shadow: 0 -2px 20px rgba(0,0,0,0.05); display: flex; justify-content: space-around; align-items: center; padding: 0 20px; }
+        .nav-icon { width: 24px; height: 24px; border-radius: 5px; cursor: pointer; display: flex; justify-content: center; align-items: center; font-size: 22px; background: transparent; }
+        .add-btn { width: 56px; height: 56px; background: #222; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: #fff; font-size: 30px; font-weight: 300; transform: translateY(-10px); box-shadow: 0 4px 10px rgba(0,0,0,0.2); cursor: pointer; }
+
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 100; justify-content: center; align-items: flex-end; }
+        .modal-content { background: #fff; width: 100%; max-width: 480px; border-radius: 20px 20px 0 0; padding: 25px 20px 40px 20px; animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; font-size: 13px; color: #666; margin-bottom: 6px; font-weight: bold; }
+        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 10px; font-size: 15px; background: #f9f9f9; outline: none; }
+        .form-group input:focus, .form-group select:focus, textarea:focus { border-color: #a8e038; background: #fff; }
+        .modal-btns { display: flex; gap: 15px; margin-top: 25px; }
+        .btn { flex: 1; padding: 14px; border: none; border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .btn-cancel { background: #f0f0f0; color: #666; }
+        .btn-submit { background: #222; color: #fff; }
+        .btn-submit:disabled { background: #999; cursor: not-allowed; }
+        
+        /* 设置面板标签样式 */
+        .cat-tag-manage { background: #f0f0f0; padding: 6px 14px; border-radius: 20px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+        .cat-tag-manage .del-icon { color: #ff4d4f; cursor: pointer; font-weight: bold; padding: 0 4px; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <header><h1>有数</h1></header>
+
+    <section class="overview-card">
+        <div class="overview-header">资产总览 <span class="tag">1/1</span></div>
+        <div class="asset-data">
+            <div class="data-item">
+                <div class="data-label">总资产</div>
+                <div class="data-value"><small>¥</small><span id="total-asset">0.00</span></div>
+            </div>
+            <div class="data-item">
+                <div class="data-label">日均成本</div>
+                <div class="data-value"><small>¥</small><span id="avg-daily-cost">0.00</span></div>
+            </div>
+        </div>
+        <div class="status-bars">
+            <div class="status-item"><div>服役中 <span id="count-active" style="color:#222; font-weight:bold;">0</span></div><div class="bar active"></div></div>
+            <div class="status-item"><div>已退役 <span id="count-retired" style="color:#222; font-weight:bold;">0</span></div><div class="bar"></div></div>
+            <div class="status-item"><div>已卖出 <span id="count-sold" style="color:#222; font-weight:bold;">0</span></div><div class="bar"></div></div>
+        </div>
+    </section>
+
+    <section class="category-tabs" id="category-tabs-container">
+        </section>
+
+    <section class="filter-tags">
+        <div class="filter-tag active">全部</div>
+        <div class="filter-tag">服役中</div>
+        <div class="filter-tag">已退役</div>
+        <div class="filter-tag">已卖出</div>
+    </section>
+
+    <section class="item-list" id="item-list-container"></section>
+
+    <div class="modal" id="add-modal">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 20px; font-size: 20px;" id="modal-title">录入新资产</h2>
+            <div class="form-group"><label>物品名称</label><input type="text" id="input-name" placeholder="例如：APT 300 控制器"></div>
+            <div style="display: flex; gap: 15px;">
+                <div class="form-group" style="flex: 1;"><label>购入价格 (¥)</label><input type="number" id="input-price" placeholder="0.00"></div>
+                <div class="form-group" style="flex: 1;"><label>购入日期</label><input type="date" id="input-date"></div>
+            </div>
+            <div style="display: flex; gap: 15px;">
+                <div class="form-group" style="flex: 1;">
+                    <label>一级分类</label>
+                    <select id="input-category1">
+                        </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>当前状态</label>
+                    <select id="input-status">
+                        <option value="服役中">服役中</option><option value="已退役">已退役</option><option value="已卖出">已卖出</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group"><label>二级分类 / 标签</label><input type="text" id="input-category2" placeholder="例如：电摩改装"></div>
+            <div class="form-group"><label>备注详情</label><textarea id="input-notes" rows="2" placeholder="记录一些详情..." style="width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 10px; font-size: 14px; background: #f9f9f9; outline: none; resize: none;"></textarea></div>
+            <div class="modal-btns">
+                <button class="btn btn-cancel" id="btn-cancel">取消</button>
+                <button class="btn btn-submit" id="btn-submit">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="detail-drawer">
+        <div class="modal-content" style="padding-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="font-size: 20px;" id="drawer-title">物品详情</h2>
+                <div id="drawer-close" style="background: #f0f0f0; width: 30px; height: 30px; border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; color: #666;">✕</div>
+            </div>
+            <div style="background: #f9f9f9; border-radius: 15px; padding: 15px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: #888; font-size: 13px;">分类标签</span><span id="drawer-tags" style="font-size: 13px; font-weight: bold;"></span></div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: #888; font-size: 13px;">购入日期</span><span id="drawer-date" style="font-size: 13px; font-weight: bold;"></span></div>
+                <div style="display: flex; justify-content: space-between;"><span style="color: #888; font-size: 13px;">详细备注</span><span id="drawer-notes" style="font-size: 13px; text-align: right; max-width: 60%;"></span></div>
+            </div>
+            <div class="modal-btns">
+                <button class="btn btn-cancel" id="btn-delete" style="color: #ff4d4f; background: #fff1f0;">删除</button>
+                <button class="btn btn-submit" id="btn-edit">编辑</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="settings-modal">
+        <div class="modal-content" style="padding-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="font-size: 20px;">系统设置</h2>
+                <div id="settings-close" style="background: #f0f0f0; width: 30px; height: 30px; border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; color: #666;">✕</div>
+            </div>
             
-            let icon = '📦';
-            if (item['一级分类'] === '交通出行') icon = '🛵';
-            else if (item['一级分类'] === '电子设备') icon = '💻';
-            else if (item['一级分类'] === '兴趣爱好') icon = '🃏';
+            <div class="form-group">
+                <label>自定义一级分类</label>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <input type="text" id="new-category-input" placeholder="输入新分类 (如: 办公用品)">
+                    <button class="btn btn-submit" id="btn-add-category" style="padding: 12px; border-radius: 10px; flex: none; width: 70px; font-size: 14px;">添加</button>
+                </div>
+                <div id="category-manage-list" style="display: flex; flex-wrap: wrap; gap: 10px;">
+                    </div>
+            </div>
 
-            const card = document.createElement('div');
-            card.className = 'item-card';
-            card.innerHTML = `
-                <div class="item-status-dot">${item['当前状态']}</div>
-                <div class="item-icon" style="display:flex; justify-content:center; align-items:center; font-size:24px; background:#f4fbf0;">${icon}</div>
-                <div class="item-name">${item['物品名称']}</div>
-                <div class="item-subtext">¥${formatMoney(price)} | 已使用 ${days} 天</div>
-                <div class="item-daily-cost">¥${formatMoney(dailyCost)}<small>/天</small></div>
-            `;
-            
-            card.addEventListener('click', () => {
-                // 点击卡片时，记录下行号和数据
-                currentActiveRowId = item._rowIndex;
-                currentActiveItem = item;
-                
-                document.getElementById('drawer-title').innerText = item['物品名称'];
-                document.getElementById('drawer-tags').innerText = `${item['一级分类']} - ${item['二级分类'] || '无标签'}`;
-                // 修复日期显示可能带有时区T的格式
-                document.getElementById('drawer-date').innerText = item['购入日期'].split('T')[0];
-                document.getElementById('drawer-notes').innerText = item['备注'] || '暂无备注...';
-                
-                detailDrawer.style.display = 'flex';
-            });
-            
-            itemListContainer.appendChild(card);
-        });
-    }
+            <div class="form-group" style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+                <label>系统操作</label>
+                <button class="btn btn-cancel" id="btn-reset-token" style="width: 100%; color: #ff4d4f; border: 1px solid #ffccc7; background: #fff1f0;">更换访问密钥</button>
+            </div>
+        </div>
+    </div>
+    <nav class="bottom-nav">
+        <div class="nav-icon active"></div> <div class="nav-icon"></div> <div class="nav-icon"></div> <div class="nav-icon"></div> <div class="add-btn" id="add-btn">+</div>
+    </nav>
+</div>
 
-    // === 新增/编辑/删除 的表单逻辑 ===
+<script>
+    // 1. 配置你的后端接口
+    const API_URL = "https://script.google.com/macros/s/AKfycbyykVd4KkMoJnLRqqVummjCerA_N6-O1evhTTfTbSfUFvwdkECbrk2TCfB4-tVLAYtS/exec";
+
+    // 2. DOM 元素获取
+    const itemListContainer = document.getElementById('item-list-container');
+    const totalAssetEl = document.getElementById('total-asset');
+    const avgDailyCostEl = document.getElementById('avg-daily-cost');
     const addModal = document.getElementById('add-modal');
     const btnAdd = document.getElementById('add-btn');
     const btnCancel = document.getElementById('btn-cancel');
     const btnSubmit = document.getElementById('btn-submit');
     const inputDate = document.getElementById('input-date');
+    const detailDrawer = document.getElementById('detail-drawer');
+    const drawerClose = document.getElementById('drawer-close');
 
-    // 辅助函数：清空表单
+    // 工具函数
+    const formatMoney = (num) => parseFloat(num).toFixed(2);
+    const calculateDays = (dateString) => {
+        if (!dateString) return 1;
+        const boughtDate = new Date(dateString);
+        const today = new Date();
+        const diffTime = Math.abs(today - boughtDate);
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        return diffDays > 0 ? diffDays : 1;
+    };
+
+    // === 全局状态、鉴权与分类逻辑 ===
+    const CACHE_KEY = 'youshu_data_cache';
+    const AUTH_KEY = 'youshu_auth_token';
+    const CAT_KEY = 'youshu_categories'; // 存储自定义分类的 Key
+
+    let globalData = [];           
+    let currentFilter = '全部';          // 状态过滤 (服役中、已退役)
+    let currentCategoryTab = '全部';     // 一级分类过滤
+    let currentActiveRowId = null;
+    let currentActiveItem = null;
+    let userToken = localStorage.getItem(AUTH_KEY);
+
+    // 初始化/读取一级分类数据
+    let customCategories = JSON.parse(localStorage.getItem(CAT_KEY)) || ['电子设备', '交通出行', '兴趣爱好'];
+
+    // 鉴权初始化
+    if (!userToken) {
+        userToken = prompt("首次使用，请输入专属访问密钥以连接数据库：");
+        if (userToken) localStorage.setItem(AUTH_KEY, userToken);
+        else alert("未输入密钥，只能查看本地缓存数据，无法进行云端同步！");
+    }
+
+    // ================= 新增：动态渲染分类体系 =================
+    function renderCategorySystem() {
+        // 1. 渲染顶部导航 Tabs
+        const tabsContainer = document.getElementById('category-tabs-container');
+        tabsContainer.innerHTML = `<div class="${currentCategoryTab === '全部' ? 'active' : ''}" onclick="switchCategoryTab('全部')">全部</div>`;
+        customCategories.forEach(cat => {
+            tabsContainer.innerHTML += `<div class="${currentCategoryTab === cat ? 'active' : ''}" onclick="switchCategoryTab('${cat}')">${cat}</div>`;
+        });
+
+        // 2. 渲染新建表单的下拉菜单
+        const selectMenu = document.getElementById('input-category1');
+        selectMenu.innerHTML = '';
+        customCategories.forEach(cat => {
+            selectMenu.innerHTML += `<option value="${cat}">${cat}</option>`;
+        });
+
+        // 3. 渲染设置面板中的管理列表
+        const manageList = document.getElementById('category-manage-list');
+        manageList.innerHTML = '';
+        customCategories.forEach((cat, index) => {
+            manageList.innerHTML += `
+                <div class="cat-tag-manage">
+                    <span>${cat}</span> 
+                    <span class="del-icon" onclick="removeCategory(${index}, '${cat}')">×</span>
+                </div>
+            `;
+        });
+    }
+
+    // 切换顶部一级分类
+    window.switchCategoryTab = (catName) => {
+        currentCategoryTab = catName;
+        renderCategorySystem(); // 更新选中高亮
+        renderItems(globalData); // 触发列表重绘
+    };
+
+    // 删除分类
+    window.removeCategory = (index, catName) => {
+        if (customCategories.length <= 1) return alert('至少需要保留一个分类！');
+        if (confirm(`确定要移除分类 [${catName}] 吗？\n(注意：这不会删除该分类下的物品，只是不再作为快捷选项)`)) {
+            customCategories.splice(index, 1);
+            localStorage.setItem(CAT_KEY, JSON.stringify(customCategories));
+            if(currentCategoryTab === catName) currentCategoryTab = '全部';
+            renderCategorySystem();
+            renderItems(globalData);
+        }
+    };
+    // ==========================================================
+
+    async function loadData() {
+        const cachedData = localStorage.getItem(CACHE_KEY);
+        if (cachedData) {
+            globalData = JSON.parse(cachedData);
+            renderItems(globalData);
+            calculateOverview(globalData);
+        } else {
+            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">正在连接云端数据库...</div>';
+        }
+
+        if (!userToken) return;
+
+        try {
+            const response = await fetch(`${API_URL}?token=${encodeURIComponent(userToken)}`);
+            const result = await response.json();
+
+            if (result.error === "Unauthorized") {
+                alert("密钥验证失败！请进入设置重新输入。");
+                return;
+            }
+
+            globalData = result;
+            localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
+            renderItems(globalData);
+            calculateOverview(globalData);
+        } catch (error) {
+            if (!cachedData) itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: red;">加载失败，请检查网络。</div>';
+        }
+    }
+
+    // === 更新：双重过滤渲染逻辑 ===
+    function renderItems(data) {
+        itemListContainer.innerHTML = '';
+        
+        // 过滤：同时满足“当前状态”和“一级分类”
+        const filteredData = data.filter(item => {
+            const matchStatus = currentFilter === '全部' ? true : item['当前状态'] === currentFilter;
+            const matchCat = currentCategoryTab === '全部' ? true : item['一级分类'] === currentCategoryTab;
+            return matchStatus && matchCat;
+        });
+
+        filteredData.forEach(item => {
+            const days = calculateDays(item['购入日期']);
+            const price = parseFloat(item['购入价格']) || 0;
+            const dailyCost = price / days;
+
+            let icon = '📦';
+            if (item['一级分类'] === '交通出行') icon = '🛵';
+            else if (item['一级分类'] === '电子设备') icon = '💻';
+            else if (item['一级分类'] === '兴趣爱好') icon = '🃏';
+            // 若自定义分类，会默认使用 📦 图标
+
+            let statusClass = 'status-active';
+            if (item['当前状态'] === '已退役') statusClass = 'status-retired';
+            else if (item['当前状态'] === '已卖出') statusClass = 'status-sold';
+
+            const card = document.createElement('div');
+            card.className = 'item-card';
+            card.innerHTML = `
+                <div class="item-status-dot ${statusClass}">${item['当前状态']}</div>
+                <div class="item-icon" style="display:flex; justify-content:center; align-items:center; font-size:24px; background:#f4fbf0;">${icon}</div>
+                <div class="item-name">${item['物品名称']}</div>
+                <div class="item-subtext">¥${formatMoney(price)} | 已使用 ${days} 天</div>
+                <div class="item-daily-cost">¥${formatMoney(dailyCost)}<small>/天</small></div>
+            `;
+
+            card.addEventListener('click', () => {
+                currentActiveRowId = item._rowIndex;
+                currentActiveItem = item;
+                document.getElementById('drawer-title').innerText = item['物品名称'];
+                document.getElementById('drawer-tags').innerText = `${item['一级分类']} - ${item['二级分类'] || '无标签'}`;
+                document.getElementById('drawer-date').innerText = item['购入日期'] ? String(item['购入日期']).split('T')[0] : '未知';
+                document.getElementById('drawer-notes').innerText = item['备注'] || '暂无备注...';
+                detailDrawer.style.display = 'flex';
+            });
+            itemListContainer.appendChild(card);
+        });
+
+        if (filteredData.length === 0) itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">这里空空如也~</div>';
+    }
+
+    function calculateOverview(data) {
+        let totalAsset = 0; let totalDailyCost = 0;
+        let countActive = 0; let countRetired = 0; let countSold = 0;
+
+        data.forEach(item => {
+            if (item['当前状态'] === '服役中') {
+                const price = parseFloat(item['购入价格']) || 0;
+                const days = calculateDays(item['购入日期']);
+                totalAsset += price;
+                totalDailyCost += (price / days);
+                countActive++;
+            } else if (item['当前状态'] === '已退役') { countRetired++; } 
+              else if (item['当前状态'] === '已卖出') { countSold++; }
+        });
+
+        totalAssetEl.innerText = formatMoney(totalAsset);
+        avgDailyCostEl.innerText = formatMoney(totalDailyCost);
+        document.getElementById('count-active').innerText = countActive;
+        document.getElementById('count-retired').innerText = countRetired;
+        document.getElementById('count-sold').innerText = countSold;
+    }
+
+    function bindEvents() {
+        // 状态标签点击事件
+        const filterTags = document.querySelectorAll('.filter-tag');
+        filterTags.forEach(tag => {
+            tag.addEventListener('click', (e) => {
+                filterTags.forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                currentFilter = e.target.innerText.trim();
+                renderItems(globalData);
+            });
+        });
+
+        // 导航栏点击事件 (第4个图标唤起设置面板)
+        const navIcons = document.querySelectorAll('.nav-icon');
+        const icons = ['🏠', '💚', '📊', '⚙️'];
+        navIcons.forEach((nav, index) => {
+            nav.innerText = icons[index];
+            if(index !== 0) nav.style.opacity = '0.4';
+            nav.addEventListener('click', () => {
+                navIcons.forEach(n => n.style.opacity = '0.4');
+                nav.style.opacity = '1';
+                if(index === 3) document.getElementById('settings-modal').style.display = 'flex';
+            });
+        });
+
+        // ================= 设置面板事件绑定 =================
+        document.getElementById('settings-close').addEventListener('click', () => {
+            document.getElementById('settings-modal').style.display = 'none';
+        });
+
+        document.getElementById('btn-add-category').addEventListener('click', () => {
+            const input = document.getElementById('new-category-input');
+            const newCat = input.value.trim();
+            if(!newCat) return;
+            if(customCategories.includes(newCat)) return alert('该分类已存在！');
+            
+            customCategories.push(newCat);
+            localStorage.setItem(CAT_KEY, JSON.stringify(customCategories));
+            input.value = '';
+            renderCategorySystem(); // 更新 UI
+        });
+
+        document.getElementById('btn-reset-token').addEventListener('click', () => {
+            const newToken = prompt("请输入新的专属访问密钥：");
+            if(newToken) {
+                userToken = newToken;
+                localStorage.setItem(AUTH_KEY, userToken);
+                alert("密钥已更新，正在重新拉取数据...");
+                loadData();
+                document.getElementById('settings-modal').style.display = 'none';
+            }
+        });
+        // ===================================================
+    }
+
+    // === 表单与接口请求逻辑 (保持原有逻辑不变) ===
+    drawerClose.addEventListener('click', () => detailDrawer.style.display = 'none');
     const clearForm = () => {
         ['input-name', 'input-price', 'input-category2', 'input-notes'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('input-category1').selectedIndex = 0;
         document.getElementById('input-status').selectedIndex = 0;
     };
 
-    // 点击加号：进入“新增”模式
     btnAdd.addEventListener('click', () => {
-        currentActiveRowId = null; // 清除行号，代表这是新增操作
+        if (!userToken) { alert("无访问权限，请在设置中输入密钥。"); return; }
+        currentActiveRowId = null;
         document.getElementById('modal-title').innerText = '录入新资产';
         clearForm();
         inputDate.valueAsDate = new Date();
@@ -93,48 +461,35 @@
 
     btnCancel.addEventListener('click', () => addModal.style.display = 'none');
 
-    // 抽屉内点击编辑：进入“修改”模式，回填数据
     document.getElementById('btn-edit').addEventListener('click', () => {
         detailDrawer.style.display = 'none';
         document.getElementById('modal-title').innerText = '修改资产信息';
-        
-        document.getElementById('input-name').value = currentActiveItem['物品名称'];
-        document.getElementById('input-price').value = currentActiveItem['购入价格'];
-        // 格式化日期回填
-        const rawDate = currentActiveItem['购入日期'].replace(/\//g, '-').split('T')[0];
-        document.getElementById('input-date').value = rawDate;
-        document.getElementById('input-category1').value = currentActiveItem['一级分类'] || '电子设备';
+        document.getElementById('input-name').value = currentActiveItem['物品名称'] || '';
+        document.getElementById('input-price').value = currentActiveItem['购入价格'] || '';
+        if(currentActiveItem['购入日期']) {
+            const rawDate = String(currentActiveItem['购入日期']).replace(/\//g, '-').split('T')[0];
+            document.getElementById('input-date').value = rawDate;
+        }
+        document.getElementById('input-category1').value = currentActiveItem['一级分类'] || customCategories[0];
         document.getElementById('input-status').value = currentActiveItem['当前状态'] || '服役中';
         document.getElementById('input-category2').value = currentActiveItem['二级分类'] || '';
         document.getElementById('input-notes').value = currentActiveItem['备注'] || '';
-        
         addModal.style.display = 'flex';
     });
 
-    // 抽屉内点击删除
     document.getElementById('btn-delete').addEventListener('click', async () => {
         if (!confirm(`确定要删除 [${currentActiveItem['物品名称']}] 吗？此操作无法撤销。`)) return;
-        
         detailDrawer.style.display = 'none';
-        
-        const payload = { action: "delete", rowId: currentActiveRowId };
-        
-        // 先在本地缓存中乐观删除，实现秒级响应
-        const oldCache = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
-        const newCache = oldCache.filter(item => item._rowIndex !== currentActiveRowId);
-        localStorage.setItem(CACHE_KEY, JSON.stringify(newCache));
-        renderItems(newCache);
-        calculateOverview(newCache);
+        const payload = { action: "delete", rowId: currentActiveRowId, token: userToken };
 
-        // 发送给云端
-        fetch(API_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload)
-        }).then(() => loadData()); // 异步对齐云端数据
+        globalData = globalData.filter(item => item._rowIndex !== currentActiveRowId);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
+        renderItems(globalData); calculateOverview(globalData);
+
+        fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) })
+            .then(res => res.json()).then(result => { if(result.error) { alert("删除失败：" + result.message); loadData(); } else { loadData(); } });
     });
 
-    // 统一处理保存（包含新增和修改）
     btnSubmit.addEventListener('click', async () => {
         const name = document.getElementById('input-name').value;
         const price = document.getElementById('input-price').value;
@@ -144,49 +499,38 @@
         const cat2 = document.getElementById('input-category2').value;
         const notes = document.getElementById('input-notes').value;
 
-        if (!name || !price || !date) {
-            alert('名称、价格和日期是必填的哦！');
-            return;
-        }
+        if (!name || !price || !date) return alert('名称、价格和日期是必填的哦！');
 
         const originalText = btnSubmit.innerText;
-        btnSubmit.innerText = '正在同步...';
-        btnSubmit.disabled = true;
+        btnSubmit.innerText = '正在同步...'; btnSubmit.disabled = true;
 
-        const payloadData = {
-            "物品名称": name,
-            "购入日期": date,
-            "购入价格": price,
-            "当前状态": status,
-            "一级分类": cat1,
-            "二级分类": cat2,
-            "备注": notes
-        };
-
-        // 判断是新增还是修改
         const payload = {
             action: currentActiveRowId ? "edit" : "add",
             rowId: currentActiveRowId,
-            data: payloadData
+            data: { "物品名称": name, "购入日期": date, "购入价格": price, "当前状态": status, "一级分类": cat1, "二级分类": cat2, "备注": notes },
+            token: userToken
         };
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
-                body: JSON.stringify(payload)
-            });
+            const response = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
             const result = await response.json();
-            
             if (result.status === 'success') {
-                addModal.style.display = 'none';
-                btnSubmit.innerText = originalText;
-                btnSubmit.disabled = false;
-                loadData(); // 重新拉取并更新缓存
+                addModal.style.display = 'none'; btnSubmit.innerText = originalText; btnSubmit.disabled = false; loadData();
+            } else {
+                alert("写入失败：" + (result.message || "未知错误")); btnSubmit.innerText = originalText; btnSubmit.disabled = false;
             }
         } catch (error) {
-            alert('写入失败，请检查网络设置。');
-            btnSubmit.innerText = originalText;
-            btnSubmit.disabled = false;
+            alert('写入失败，请检查网络设置。'); btnSubmit.innerText = originalText; btnSubmit.disabled = false;
         }
     });
+
+    // 页面加载入口
+    window.onload = () => {
+        renderCategorySystem(); // 初始化渲染分类体系
+        bindEvents();
+        loadData();
+    };
+</script>
+
+</body>
+</html>
