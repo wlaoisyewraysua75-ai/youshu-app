@@ -8,6 +8,7 @@
     <meta name="apple-mobile-web-app-title" content="有数">
     <link rel="manifest" href="./manifest.json">
     <title>我的有数</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
         body { background-color: #f5f6f8; color: #333; background-image: linear-gradient(180deg, #d8f5a2 0%, #f5f6f8 250px); background-repeat: no-repeat; display: flex; justify-content: center; }
@@ -92,6 +93,10 @@
         .child-btn { padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; font-weight: bold;}
         .child-btn-view { background: #f0f0f0; color: #333; }
         .child-btn-detach { background: #fff1f0; color: #ff4d4f; }
+
+        .chart-container { background: #fff; border-radius: 16px; padding: 15px; margin-bottom: 20px; border: 1px solid #eee; }
+        .chart-title { font-size: 13px; font-weight: bold; color: #333; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+        .chart-title::before { content: ""; display: block; width: 4px; height: 12px; background: #a8e038; border-radius: 2px; }
     </style>
 </head>
 <body>
@@ -262,6 +267,13 @@
                 </div>
             </div>
 
+            <div class="chart-container">
+                <div class="chart-title">成本下降趋势曲线</div>
+                <div style="position: relative; height: 160px; width: 100%;">
+                    <canvas id="daily-cost-chart"></canvas>
+                </div>
+            </div>
+
             <div style="background: #f9f9f9; border-radius: 15px; padding: 15px; margin-bottom: 20px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: #888; font-size: 13px;">分类标签</span><span id="drawer-tags" style="font-size: 13px; font-weight: bold;"></span></div>
                 <div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span style="color: #888; font-size: 13px;">购入日期</span><span id="drawer-date" style="font-size: 13px; font-weight: bold;"></span></div>
@@ -325,6 +337,8 @@
     const drawerClose = document.getElementById('drawer-close');
     const inputParentSelect = document.getElementById('input-parent-id');
 
+    let costChartInstance = null; // 全局图表实例
+
     const generateId = () => 'ASSET_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
     const formatMoney = (num) => parseFloat(num).toFixed(2);
 
@@ -351,7 +365,8 @@
         }
 
         const dailyCost = effectivePrice / days;
-        return { price, days, effectivePrice, dailyCost };
+        // 新增：向外暴露 startDate 和 endDate，供图表精准定位时间轴
+        return { price, days, effectivePrice, dailyCost, startDate: item['购入日期'], endDate: endDate };
     }
 
     function getAggregatedMetrics(item, allData) {
@@ -370,6 +385,61 @@
             });
         }
         return { base, aggPrice, aggDailyCost, childrenMetrics };
+    }
+
+    // 全新重写的图表数据生成算法：支持时间轴真实回溯与锯齿曲线
+    function generateChartData(agg) {
+        const labels = [];
+        const data = [];
+
+        // 以主物品的购买日作为整个图表的起点
+        const mainStart = new Date(agg.base.startDate);
+        const totalDays = agg.base.days;
+
+        // 动态采样步长，确保图表最多显示约30个点，避免手机端渲染卡顿
+        let step = Math.max(1, Math.floor(totalDays / 30));
+
+        for (let i = 1; i <= totalDays; i += step) {
+            // 算出历史上的“当前这一天”
+            let currentDate = new Date(mainStart.getTime() + (i - 1) * 24 * 60 * 60 * 1000);
+            labels.push(`${currentDate.getMonth() + 1}/${currentDate.getDate()}`);
+
+            let dailyCostAtDate = 0;
+
+            // 1. 计算主物品在这一天的历史日均
+            let mainDaysAtDate = Math.floor((currentDate - mainStart) / (1000 * 60 * 60 * 24)) + 1;
+            if (mainDaysAtDate < 1) mainDaysAtDate = 1;
+            // 如果历史时间已经超过了物品的退役日，天数不再增加（折旧冻结）
+            if (agg.base.endDate && currentDate > new Date(agg.base.endDate)) {
+                mainDaysAtDate = agg.base.days;
+            }
+            dailyCostAtDate += agg.base.effectivePrice / mainDaysAtDate;
+
+            // 2. 叠加所有配件在这一天的历史日均
+            agg.childrenMetrics.forEach(c => {
+                const childStart = new Date(c.metrics.startDate);
+                // 核心：只有到了配件被买回来的那一天及以后，才把它的成本叠加进去！
+                if (currentDate >= childStart) {
+                    let childDaysAtDate = Math.floor((currentDate - childStart) / (1000 * 60 * 60 * 24)) + 1;
+                    if (childDaysAtDate < 1) childDaysAtDate = 1;
+                    if (c.metrics.endDate && currentDate > new Date(c.metrics.endDate)) {
+                        childDaysAtDate = c.metrics.days;
+                    }
+                    dailyCostAtDate += c.metrics.effectivePrice / childDaysAtDate;
+                }
+            });
+
+            data.push(dailyCostAtDate);
+        }
+
+        // 保证曲线的最后一个点精准对应最新一天的数据
+        if (totalDays > 1 && (totalDays - 1) % step !== 0) {
+            let lastDate = new Date(mainStart.getTime() + (totalDays - 1) * 24 * 60 * 60 * 1000);
+            labels.push(`${lastDate.getMonth() + 1}/${lastDate.getDate()}`);
+            data.push(agg.aggDailyCost);
+        }
+
+        return { labels, data };
     }
 
     const CACHE_KEY = 'youshu_data_cache';
@@ -435,7 +505,7 @@
 
             globalData = result;
 
-            // 找出所有缺失“资产ID”的历史数据
+            // 找出并生成缺失的历史资产ID
             let itemsToSync = [];
             globalData.forEach(item => {
                 if (!item['资产ID']) {
@@ -447,20 +517,15 @@
             localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
             renderItems(globalData); calculateOverview(globalData);
 
-            // 【核心修复：后台串行静默同步】
-            // 将新生成的资产ID自动写回到Google表格中，避免并发过多导致请求失败
+            // 后台静默修复历史 Bug 数据
             if (itemsToSync.length > 0) {
-                console.log(`发现 ${itemsToSync.length} 条历史数据缺失资产ID，正在后台静默修复...`);
+                console.log(`正在后台自动修复 ${itemsToSync.length} 条历史数据的资产关系...`);
                 for (const item of itemsToSync) {
                     const payload = { action: "edit", rowId: item._rowIndex, data: item, token: userToken };
-                    try {
-                        await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) });
-                    } catch(e) {
-                        console.error(`行 ${item._rowIndex} 静默同步失败`, e);
-                    }
+                    try { await fetch(API_URL, { method: 'POST', body: JSON.stringify(payload) }); }
+                    catch(e) { console.error(e); }
                 }
             }
-
         } catch (e) { console.error(e); }
     }
 
@@ -495,6 +560,49 @@
         document.getElementById('drawer-price-graphic').innerText = formatMoney(agg.base.price);
         document.getElementById('drawer-children-price-graphic').innerText = formatMoney(agg.aggPrice - agg.base.price);
         document.getElementById('drawer-total-graphic').innerText = formatMoney(agg.aggPrice);
+
+        // 绘制趋势图表
+        const chartData = generateChartData(agg);
+        const ctx = document.getElementById('daily-cost-chart').getContext('2d');
+        if (costChartInstance) costChartInstance.destroy(); // 销毁上一张图表避免重叠
+
+        costChartInstance = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: [{
+                    label: '日均成本 (¥)',
+                    data: chartData.data,
+                    borderColor: '#a8e038',
+                    backgroundColor: 'rgba(168, 224, 56, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHitRadius: 10,
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: { label: function(context) { return '¥' + context.parsed.y.toFixed(2); } }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: { display: false },
+                        ticks: { maxTicksLimit: 5, font: { size: 10 }, color: '#999' }
+                    },
+                    y: {
+                        grid: { color: '#f0f0f0', drawBorder: false },
+                        ticks: { maxTicksLimit: 5, font: { size: 10 }, color: '#999', callback: function(value) { return '¥' + value; } }
+                    }
+                }
+            }
+        });
 
         const childContainer = document.getElementById('drawer-children-container');
         const childList = document.getElementById('drawer-children-list');
