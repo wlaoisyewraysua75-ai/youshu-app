@@ -460,7 +460,7 @@
 </div>
 
 <script>
-    // 1. 配置你的后端接口
+// 1. 配置你的后端接口
     const API_URL = "https://script.google.com/macros/s/AKfycbyykVd4KkMoJnLRqqVummjCerA_N6-O1evhTTfTbSfUFvwdkECbrk2TCfB4-tVLAYtS/exec";
 
     // 2. 获取页面上的 DOM 元素
@@ -468,7 +468,6 @@
     const totalAssetEl = document.getElementById('total-asset');
     const avgDailyCostEl = document.getElementById('avg-daily-cost');
 
-    // 弹窗与抽屉 DOM
     const addModal = document.getElementById('add-modal');
     const btnAdd = document.getElementById('add-btn');
     const btnCancel = document.getElementById('btn-cancel');
@@ -477,10 +476,7 @@
     const detailDrawer = document.getElementById('detail-drawer');
     const drawerClose = document.getElementById('drawer-close');
 
-    // 工具函数：保留两位小数
     const formatMoney = (num) => parseFloat(num).toFixed(2);
-
-    // 核心算法：计算已使用天数
     const calculateDays = (dateString) => {
         if (!dateString) return 1;
         const boughtDate = new Date(dateString);
@@ -490,12 +486,24 @@
         return diffDays > 0 ? diffDays : 1;
     };
 
-    // === 核心逻辑：本地缓存 + 全局状态 ===
+    // === 全局状态与鉴权逻辑 ===
     const CACHE_KEY = 'youshu_data_cache';
-    let globalData = [];           // 保存获取到的所有数据
-    let currentFilter = '全部';    // 记录当前的过滤状态
+    const AUTH_KEY = 'youshu_auth_token';
+    let globalData = [];
+    let currentFilter = '全部';
     let currentActiveRowId = null;
     let currentActiveItem = null;
+    let userToken = localStorage.getItem(AUTH_KEY);
+
+    // 鉴权初始化：如果没有 Token，提示输入
+    if (!userToken) {
+        userToken = prompt("首次使用，请输入专属访问密钥以连接数据库：");
+        if (userToken) {
+            localStorage.setItem(AUTH_KEY, userToken);
+        } else {
+            alert("未输入密钥，只能查看本地缓存数据，无法进行云端同步！");
+        }
+    }
 
     async function loadData() {
         const cachedData = localStorage.getItem(CACHE_KEY);
@@ -504,12 +512,24 @@
             renderItems(globalData);
             calculateOverview(globalData);
         } else {
-            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">首次加载，正在从云端同步...</div>';
+            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">正在连接云端数据库...</div>';
         }
 
+        if (!userToken) return; // 无 Token 则不发起网络请求
+
         try {
-            const response = await fetch(API_URL);
-            globalData = await response.json();
+            // GET 请求带上 token 参数
+            const response = await fetch(`${API_URL}?token=${encodeURIComponent(userToken)}`);
+            const result = await response.json();
+
+            // 校验失败处理
+            if (result.error === "Unauthorized") {
+                alert("密钥验证失败！请刷新页面重新输入。");
+                localStorage.removeItem(AUTH_KEY);
+                return;
+            }
+
+            globalData = result;
             localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
             renderItems(globalData);
             calculateOverview(globalData);
@@ -518,11 +538,9 @@
         }
     }
 
-    // === 渲染逻辑（附带过滤与动态颜色） ===
+    // === 渲染与总览逻辑（保持不变） ===
     function renderItems(data) {
         itemListContainer.innerHTML = '';
-
-        // 执行过滤
         const filteredData = currentFilter === '全部' ? data : data.filter(item => item['当前状态'] === currentFilter);
 
         filteredData.forEach(item => {
@@ -535,7 +553,6 @@
             else if (item['一级分类'] === '电子设备') icon = '💻';
             else if (item['一级分类'] === '兴趣爱好') icon = '🃏';
 
-            // 判断当前状态，分配对应的颜色类名
             let statusClass = 'status-active';
             if (item['当前状态'] === '已退役') statusClass = 'status-retired';
             else if (item['当前状态'] === '已卖出') statusClass = 'status-sold';
@@ -565,20 +582,14 @@
             itemListContainer.appendChild(card);
         });
 
-        // 如果该分类下没有数据，给个友好提示
         if (filteredData.length === 0) {
             itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">这里空空如也~</div>';
         }
     }
 
-    // 计算总览及各状态数量
     function calculateOverview(data) {
-        let totalAsset = 0;
-        let totalDailyCost = 0;
-
-        let countActive = 0;
-        let countRetired = 0;
-        let countSold = 0;
+        let totalAsset = 0; let totalDailyCost = 0;
+        let countActive = 0; let countRetired = 0; let countSold = 0;
 
         data.forEach(item => {
             if (item['当前状态'] === '服役中') {
@@ -587,31 +598,23 @@
                 totalAsset += price;
                 totalDailyCost += (price / days);
                 countActive++;
-            } else if (item['当前状态'] === '已退役') {
-                countRetired++;
-            } else if (item['当前状态'] === '已卖出') {
-                countSold++;
-            }
+            } else if (item['当前状态'] === '已退役') { countRetired++; }
+              else if (item['当前状态'] === '已卖出') { countSold++; }
         });
 
         totalAssetEl.innerText = formatMoney(totalAsset);
         avgDailyCostEl.innerText = formatMoney(totalDailyCost);
-
-        // 动态更新页面上的数字
         document.getElementById('count-active').innerText = countActive;
         document.getElementById('count-retired').innerText = countRetired;
         document.getElementById('count-sold').innerText = countSold;
     }
 
-    // 绑定事件（附带过滤标签点击事件更新）
     function bindEvents() {
         const filterTags = document.querySelectorAll('.filter-tag');
         filterTags.forEach(tag => {
             tag.addEventListener('click', (e) => {
                 filterTags.forEach(t => t.classList.remove('active'));
                 e.target.classList.add('active');
-
-                // 更新当前的全局过滤条件并重新渲染列表
                 currentFilter = e.target.innerText.trim();
                 renderItems(globalData);
             });
@@ -626,7 +629,6 @@
             nav.style.alignItems = 'center';
             nav.style.fontSize = '22px';
             nav.style.background = 'transparent';
-
             if(index !== 0) nav.style.opacity = '0.4';
             nav.addEventListener('click', () => {
                 navIcons.forEach(n => n.style.opacity = '0.4');
@@ -635,7 +637,7 @@
         });
     }
 
-    // === 新增/编辑/删除 的表单逻辑 ===
+    // === 表单操作逻辑（注入 Token） ===
     drawerClose.addEventListener('click', () => detailDrawer.style.display = 'none');
 
     const clearForm = () => {
@@ -645,6 +647,7 @@
     };
 
     btnAdd.addEventListener('click', () => {
+        if (!userToken) { alert("无访问权限，请刷新页面输入密钥。"); return; }
         currentActiveRowId = null;
         document.getElementById('modal-title').innerText = '录入新资产';
         clearForm();
@@ -678,9 +681,9 @@
         if (!confirm(`确定要删除 [${currentActiveItem['物品名称']}] 吗？此操作无法撤销。`)) return;
         detailDrawer.style.display = 'none';
 
-        const payload = { action: "delete", rowId: currentActiveRowId };
+        // 附带 Token 发送请求
+        const payload = { action: "delete", rowId: currentActiveRowId, token: userToken };
 
-        // 乐观删除，更新全局数据
         globalData = globalData.filter(item => item._rowIndex !== currentActiveRowId);
         localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
         renderItems(globalData);
@@ -690,7 +693,10 @@
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(payload)
-        }).then(() => loadData());
+        }).then(res => res.json()).then(result => {
+             if(result.error) { alert("删除失败：" + result.message); loadData(); }
+             else { loadData(); }
+        });
     });
 
     btnSubmit.addEventListener('click', async () => {
@@ -712,19 +718,16 @@
         btnSubmit.disabled = true;
 
         const payloadData = {
-            "物品名称": name,
-            "购入日期": date,
-            "购入价格": price,
-            "当前状态": status,
-            "一级分类": cat1,
-            "二级分类": cat2,
-            "备注": notes
+            "物品名称": name, "购入日期": date, "购入价格": price,
+            "当前状态": status, "一级分类": cat1, "二级分类": cat2, "备注": notes
         };
 
+        // 附带 Token 发送请求
         const payload = {
             action: currentActiveRowId ? "edit" : "add",
             rowId: currentActiveRowId,
-            data: payloadData
+            data: payloadData,
+            token: userToken
         };
 
         try {
@@ -740,6 +743,10 @@
                 btnSubmit.innerText = originalText;
                 btnSubmit.disabled = false;
                 loadData();
+            } else {
+                alert("写入失败：" + (result.message || "未知错误"));
+                btnSubmit.innerText = originalText;
+                btnSubmit.disabled = false;
             }
         } catch (error) {
             alert('写入失败，请检查网络设置。');
