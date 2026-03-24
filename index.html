@@ -1,654 +1,90 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>我的有数</title>
-    <style>
-        /* 基础重置与全局变量 */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        }
-        body {
-            background-color: #f5f6f8;
-            color: #333;
-            background-image: linear-gradient(180deg, #d8f5a2 0%, #f5f6f8 250px);
-            background-repeat: no-repeat;
-            display: flex;
-            justify-content: center;
-        }
-        .app-container {
-            width: 100%;
-            max-width: 480px;
-            min-height: 100vh;
-            position: relative;
-            padding-bottom: 80px;
-        }
-
-        /* 顶部标题区 */
-        header {
-            padding: 20px 20px 10px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        header h1 {
-            font-size: 24px;
-            font-weight: 800;
-        }
-
-        /* 资产总览卡片 */
-        .overview-card {
-            background: #ffffff;
-            border-radius: 20px;
-            margin: 0 20px;
-            padding: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
-        }
-        .overview-header {
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-        }
-        .overview-header span.tag {
-            background: #f0f0f0;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 12px;
-            margin-left: 8px;
-            color: #666;
-        }
-        .asset-data {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 20px;
-        }
-        .data-item {
-            flex: 1;
-        }
-        .data-label {
-            font-size: 12px;
-            color: #888;
-            margin-bottom: 5px;
-        }
-        .data-value {
-            font-size: 24px;
-            font-weight: 800;
-        }
-        .data-value small {
-            font-size: 14px;
-            margin-right: 2px;
-        }
-
-        /* 状态进度条 */
-        .status-bars {
-            display: flex;
-            gap: 10px;
-            font-size: 11px;
-            color: #999;
-        }
-        .status-item {
-            flex: 1;
-        }
-        .bar {
-            height: 4px;
-            background: #f0f0f0;
-            border-radius: 2px;
-            margin-top: 5px;
-        }
-        .bar.active {
-            background: #a8e038;
-        }
-
-        /* 分类标签区 */
-        .category-tabs {
-            padding: 20px;
-            display: flex;
-            gap: 15px;
-            font-size: 15px;
-            font-weight: bold;
-            color: #888;
-        }
-        .category-tabs .active {
-            color: #333;
-            border-bottom: 3px solid #a8e038;
-            padding-bottom: 2px;
-        }
-
-        /* 二级过滤区 */
-        .filter-tags {
-            padding: 0 20px 10px 20px;
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-        }
-        .filter-tags::-webkit-scrollbar {
-            display: none;
-        }
-        .filter-tag {
-            background: #ffffff;
-            padding: 6px 16px;
-            border-radius: 20px;
-            font-size: 13px;
-            color: #666;
-            white-space: nowrap;
-            cursor: pointer;
-        }
-        .filter-tag.active {
-            background: #222;
-            color: #fff;
-        }
-
-        /* 物品列表区 */
-        .item-list {
-            padding: 10px 20px;
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        .item-card {
-            background: #ffffff;
-            border-radius: 16px;
-            padding: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.02);
-            position: relative;
-            cursor: pointer;
-        }
-
-        /* 状态圆点 - 基础样式 */
-        .item-status-dot {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .item-status-dot::before {
-            content: "";
-            display: block;
-            width: 4px;
-            height: 4px;
-            border-radius: 50%;
-        }
-        /* 状态颜色细分 */
-        .status-active { background: #f4fbf0; color: #5ba12b; }
-        .status-active::before { background: #5ba12b; }
-
-        .status-retired { background: #f5f5f5; color: #888888; }
-        .status-retired::before { background: #888888; }
-
-        .status-sold { background: #fff7e6; color: #fa8c16; }
-        .status-sold::before { background: #fa8c16; }
-
-        .item-icon {
-            width: 40px;
-            height: 40px;
-            background: #f0f0f0;
-            border-radius: 8px;
-            margin-bottom: 10px;
-        }
-        .item-name {
-            font-size: 14px;
-            font-weight: bold;
-            margin-bottom: 4px;
-            color: #222;
-        }
-        .item-subtext {
-            font-size: 11px;
-            color: #999;
-            margin-bottom: 15px;
-        }
-        .item-daily-cost {
-            font-size: 16px;
-            font-weight: bold;
-        }
-        .item-daily-cost small {
-            font-size: 11px;
-            color: #888;
-            font-weight: normal;
-        }
-
-        /* 底部导航栏 */
-        .bottom-nav {
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-            max-width: 480px;
-            background: #ffffff;
-            height: 70px;
-            border-radius: 30px 30px 0 0;
-            box-shadow: 0 -2px 20px rgba(0,0,0,0.05);
-            display: flex;
-            justify-content: space-around;
-            align-items: center;
-            padding: 0 20px;
-        }
-        .nav-icon {
-            width: 24px;
-            height: 24px;
-            background: #ddd;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .nav-icon.active {
-            background: #222;
-        }
-        .add-btn {
-            width: 56px;
-            height: 56px;
-            background: #222;
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: #fff;
-            font-size: 30px;
-            font-weight: 300;
-            transform: translateY(-10px);
-            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-            cursor: pointer;
-        }
-
-        /* 弹窗及抽屉通用样式 */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 100;
-            justify-content: center;
-            align-items: flex-end;
-        }
-        .modal-content {
-            background: #fff;
-            width: 100%;
-            max-width: 480px;
-            border-radius: 20px 20px 0 0;
-            padding: 25px 20px 40px 20px;
-            animation: slideUp 0.3s ease-out;
-        }
-        @keyframes slideUp {
-            from { transform: translateY(100%); }
-            to { transform: translateY(0); }
-        }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            font-size: 13px;
-            color: #666;
-            margin-bottom: 6px;
-            font-weight: bold;
-        }
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #eee;
-            border-radius: 10px;
-            font-size: 15px;
-            background: #f9f9f9;
-            outline: none;
-        }
-        .form-group input:focus, .form-group select:focus, textarea:focus {
-            border-color: #a8e038;
-            background: #fff;
-        }
-        .modal-btns {
-            display: flex;
-            gap: 15px;
-            margin-top: 25px;
-        }
-        .btn {
-            flex: 1;
-            padding: 14px;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .btn-cancel { background: #f0f0f0; color: #666; }
-        .btn-submit { background: #222; color: #fff; }
-        .btn-submit:disabled { background: #999; cursor: not-allowed; }
-    </style>
-</head>
-<body>
-
-<div class="app-container">
-    <header>
-        <h1>有数</h1>
-    </header>
-
-    <section class="overview-card">
-        <div class="overview-header">
-            资产总览 <span class="tag">1/1</span>
-        </div>
-        <div class="asset-data">
-            <div class="data-item">
-                <div class="data-label">总资产</div>
-                <div class="data-value"><small>¥</small><span id="total-asset">0.00</span></div>
-            </div>
-            <div class="data-item">
-                <div class="data-label">日均成本</div>
-                <div class="data-value"><small>¥</small><span id="avg-daily-cost">0.00</span></div>
-            </div>
-        </div>
-        <div class="status-bars">
-            <div class="status-item">
-                <div>服役中 <span id="count-active" style="color:#222; font-weight:bold;">0</span></div>
-                <div class="bar active"></div>
-            </div>
-            <div class="status-item">
-                <div>已退役 <span id="count-retired" style="color:#222; font-weight:bold;">0</span></div>
-                <div class="bar"></div>
-            </div>
-            <div class="status-item">
-                <div>已卖出 <span id="count-sold" style="color:#222; font-weight:bold;">0</span></div>
-                <div class="bar"></div>
-            </div>
-        </div>
-    </section>
-
-    <section class="category-tabs">
-        <div class="active">全部</div>
-        <div>电子设备</div>
-    </section>
-
-    <section class="filter-tags">
-        <div class="filter-tag active">全部</div>
-        <div class="filter-tag">服役中</div>
-        <div class="filter-tag">已退役</div>
-        <div class="filter-tag">已卖出</div>
-    </section>
-
-    <section class="item-list" id="item-list-container">
-        </section>
-
-    <div class="modal" id="add-modal">
-        <div class="modal-content">
-            <h2 style="margin-bottom: 20px; font-size: 20px;" id="modal-title">录入新资产</h2>
-            <div class="form-group">
-                <label>物品名称</label>
-                <input type="text" id="input-name" placeholder="例如：APT 300 控制器">
-            </div>
-            <div style="display: flex; gap: 15px;">
-                <div class="form-group" style="flex: 1;">
-                    <label>购入价格 (¥)</label>
-                    <input type="number" id="input-price" placeholder="0.00">
-                </div>
-                <div class="form-group" style="flex: 1;">
-                    <label>购入日期</label>
-                    <input type="date" id="input-date">
-                </div>
-            </div>
-            <div style="display: flex; gap: 15px;">
-                <div class="form-group" style="flex: 1;">
-                    <label>一级分类</label>
-                    <select id="input-category1">
-                        <option value="电子设备">电子设备</option>
-                        <option value="交通出行">交通出行</option>
-                        <option value="兴趣爱好">兴趣爱好</option>
-                    </select>
-                </div>
-                <div class="form-group" style="flex: 1;">
-                    <label>当前状态</label>
-                    <select id="input-status">
-                        <option value="服役中">服役中</option>
-                        <option value="已退役">已退役</option>
-                        <option value="已卖出">已卖出</option>
-                    </select>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>二级分类 / 标签</label>
-                <input type="text" id="input-category2" placeholder="例如：电摩改装">
-            </div>
-            <div class="form-group">
-                <label>备注详情</label>
-                <textarea id="input-notes" rows="2" placeholder="例如：换了 72V 120Ah 的电池，动力提升明显" style="width: 100%; padding: 12px; border: 1px solid #eee; border-radius: 10px; font-size: 14px; background: #f9f9f9; outline: none; resize: none;"></textarea>
-            </div>
-
-            <div class="modal-btns">
-                <button class="btn btn-cancel" id="btn-cancel">取消</button>
-                <button class="btn btn-submit" id="btn-submit">保存</button>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal" id="detail-drawer">
-        <div class="modal-content" style="padding-bottom: 30px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="font-size: 20px;" id="drawer-title">物品详情</h2>
-                <div id="drawer-close" style="background: #f0f0f0; width: 30px; height: 30px; border-radius: 50%; display: flex; justify-content: center; align-items: center; cursor: pointer; color: #666;">✕</div>
-            </div>
-
-            <div style="background: #f9f9f9; border-radius: 15px; padding: 15px; margin-bottom: 20px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                    <span style="color: #888; font-size: 13px;">分类标签</span>
-                    <span id="drawer-tags" style="font-size: 13px; font-weight: bold;"></span>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                    <span style="color: #888; font-size: 13px;">购入日期</span>
-                    <span id="drawer-date" style="font-size: 13px; font-weight: bold;"></span>
-                </div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span style="color: #888; font-size: 13px;">详细备注</span>
-                    <span id="drawer-notes" style="font-size: 13px; text-align: right; max-width: 60%;"></span>
-                </div>
-            </div>
-
-            <div class="modal-btns">
-                <button class="btn btn-cancel" id="btn-delete" style="color: #ff4d4f; background: #fff1f0;">删除</button>
-                <button class="btn btn-submit" id="btn-edit">编辑</button>
-            </div>
-        </div>
-    </div>
-
-    <nav class="bottom-nav">
-        <div class="nav-icon active"></div> <div class="nav-icon"></div> <div class="nav-icon"></div> <div class="nav-icon"></div> <div class="add-btn" id="add-btn">+</div>
-    </nav>
-</div>
-
-<script>
-// 1. 配置你的后端接口
-    const API_URL = "https://script.google.com/macros/s/AKfycbyykVd4KkMoJnLRqqVummjCerA_N6-O1evhTTfTbSfUFvwdkECbrk2TCfB4-tVLAYtS/exec";
-
-    // 2. 获取页面上的 DOM 元素
-    const itemListContainer = document.getElementById('item-list-container');
-    const totalAssetEl = document.getElementById('total-asset');
-    const avgDailyCostEl = document.getElementById('avg-daily-cost');
-
-    const addModal = document.getElementById('add-modal');
-    const btnAdd = document.getElementById('add-btn');
-    const btnCancel = document.getElementById('btn-cancel');
-    const btnSubmit = document.getElementById('btn-submit');
-    const inputDate = document.getElementById('input-date');
-    const detailDrawer = document.getElementById('detail-drawer');
-    const drawerClose = document.getElementById('drawer-close');
-
-    const formatMoney = (num) => parseFloat(num).toFixed(2);
-    const calculateDays = (dateString) => {
-        if (!dateString) return 1;
-        const boughtDate = new Date(dateString);
-        const today = new Date();
-        const diffTime = Math.abs(today - boughtDate);
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        return diffDays > 0 ? diffDays : 1;
-    };
-
-    // === 全局状态与鉴权逻辑 ===
+// === 核心逻辑：本地缓存 + 异步刷新 ===
     const CACHE_KEY = 'youshu_data_cache';
-    const AUTH_KEY = 'youshu_auth_token';
-    let globalData = [];
-    let currentFilter = '全部';
-    let currentActiveRowId = null;
-    let currentActiveItem = null;
-    let userToken = localStorage.getItem(AUTH_KEY);
-
-    // 鉴权初始化：如果没有 Token，提示输入
-    if (!userToken) {
-        userToken = prompt("首次使用，请输入专属访问密钥以连接数据库：");
-        if (userToken) {
-            localStorage.setItem(AUTH_KEY, userToken);
-        } else {
-            alert("未输入密钥，只能查看本地缓存数据，无法进行云端同步！");
-        }
-    }
+    let currentActiveRowId = null; // 用于记录当前打开的物品的行号
+    let currentActiveItem = null;  // 记录当前打开的物品完整数据
 
     async function loadData() {
         const cachedData = localStorage.getItem(CACHE_KEY);
         if (cachedData) {
-            globalData = JSON.parse(cachedData);
-            renderItems(globalData);
-            calculateOverview(globalData);
+            const data = JSON.parse(cachedData);
+            renderItems(data);
+            calculateOverview(data);
         } else {
-            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">正在连接云端数据库...</div>';
+            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">首次加载，正在从云端同步...</div>';
         }
-
-        if (!userToken) return; // 无 Token 则不发起网络请求
-
+        
         try {
-            // GET 请求带上 token 参数
-            const response = await fetch(`${API_URL}?token=${encodeURIComponent(userToken)}`);
-            const result = await response.json();
-
-            // 校验失败处理
-            if (result.error === "Unauthorized") {
-                alert("密钥验证失败！请刷新页面重新输入。");
-                localStorage.removeItem(AUTH_KEY);
-                return;
-            }
-
-            globalData = result;
-            localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
-            renderItems(globalData);
-            calculateOverview(globalData);
+            const response = await fetch(API_URL);
+            const data = await response.json();
+            localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            renderItems(data);
+            calculateOverview(data);
         } catch (error) {
             if (!cachedData) itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: red;">加载失败，请检查网络。</div>';
         }
     }
 
-    // === 渲染与总览逻辑（保持不变） ===
+    const detailDrawer = document.getElementById('detail-drawer');
+    const drawerClose = document.getElementById('drawer-close');
+    drawerClose.addEventListener('click', () => detailDrawer.style.display = 'none');
+
     function renderItems(data) {
         itemListContainer.innerHTML = '';
-        const filteredData = currentFilter === '全部' ? data : data.filter(item => item['当前状态'] === currentFilter);
-
-        filteredData.forEach(item => {
+        data.forEach(item => {
             const days = calculateDays(item['购入日期']);
             const price = parseFloat(item['购入价格']) || 0;
             const dailyCost = price / days;
-
+            
             let icon = '📦';
             if (item['一级分类'] === '交通出行') icon = '🛵';
             else if (item['一级分类'] === '电子设备') icon = '💻';
             else if (item['一级分类'] === '兴趣爱好') icon = '🃏';
 
-            let statusClass = 'status-active';
-            if (item['当前状态'] === '已退役') statusClass = 'status-retired';
-            else if (item['当前状态'] === '已卖出') statusClass = 'status-sold';
-
             const card = document.createElement('div');
             card.className = 'item-card';
             card.innerHTML = `
-                <div class="item-status-dot ${statusClass}">${item['当前状态']}</div>
+                <div class="item-status-dot">${item['当前状态']}</div>
                 <div class="item-icon" style="display:flex; justify-content:center; align-items:center; font-size:24px; background:#f4fbf0;">${icon}</div>
                 <div class="item-name">${item['物品名称']}</div>
                 <div class="item-subtext">¥${formatMoney(price)} | 已使用 ${days} 天</div>
                 <div class="item-daily-cost">¥${formatMoney(dailyCost)}<small>/天</small></div>
             `;
-
+            
             card.addEventListener('click', () => {
+                // 点击卡片时，记录下行号和数据
                 currentActiveRowId = item._rowIndex;
                 currentActiveItem = item;
-
+                
                 document.getElementById('drawer-title').innerText = item['物品名称'];
                 document.getElementById('drawer-tags').innerText = `${item['一级分类']} - ${item['二级分类'] || '无标签'}`;
-                document.getElementById('drawer-date').innerText = item['购入日期'] ? String(item['购入日期']).split('T')[0] : '未知';
+                // 修复日期显示可能带有时区T的格式
+                document.getElementById('drawer-date').innerText = item['购入日期'].split('T')[0];
                 document.getElementById('drawer-notes').innerText = item['备注'] || '暂无备注...';
-
+                
                 detailDrawer.style.display = 'flex';
             });
-
+            
             itemListContainer.appendChild(card);
         });
-
-        if (filteredData.length === 0) {
-            itemListContainer.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; color: #999; padding: 20px;">这里空空如也~</div>';
-        }
     }
 
-    function calculateOverview(data) {
-        let totalAsset = 0; let totalDailyCost = 0;
-        let countActive = 0; let countRetired = 0; let countSold = 0;
+    // === 新增/编辑/删除 的表单逻辑 ===
+    const addModal = document.getElementById('add-modal');
+    const btnAdd = document.getElementById('add-btn');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnSubmit = document.getElementById('btn-submit');
+    const inputDate = document.getElementById('input-date');
 
-        data.forEach(item => {
-            if (item['当前状态'] === '服役中') {
-                const price = parseFloat(item['购入价格']) || 0;
-                const days = calculateDays(item['购入日期']);
-                totalAsset += price;
-                totalDailyCost += (price / days);
-                countActive++;
-            } else if (item['当前状态'] === '已退役') { countRetired++; }
-              else if (item['当前状态'] === '已卖出') { countSold++; }
-        });
-
-        totalAssetEl.innerText = formatMoney(totalAsset);
-        avgDailyCostEl.innerText = formatMoney(totalDailyCost);
-        document.getElementById('count-active').innerText = countActive;
-        document.getElementById('count-retired').innerText = countRetired;
-        document.getElementById('count-sold').innerText = countSold;
-    }
-
-    function bindEvents() {
-        const filterTags = document.querySelectorAll('.filter-tag');
-        filterTags.forEach(tag => {
-            tag.addEventListener('click', (e) => {
-                filterTags.forEach(t => t.classList.remove('active'));
-                e.target.classList.add('active');
-                currentFilter = e.target.innerText.trim();
-                renderItems(globalData);
-            });
-        });
-
-        const navIcons = document.querySelectorAll('.nav-icon');
-        const icons = ['🏠', '💚', '📊', '⚙️'];
-        navIcons.forEach((nav, index) => {
-            nav.innerText = icons[index];
-            nav.style.display = 'flex';
-            nav.style.justifyContent = 'center';
-            nav.style.alignItems = 'center';
-            nav.style.fontSize = '22px';
-            nav.style.background = 'transparent';
-            if(index !== 0) nav.style.opacity = '0.4';
-            nav.addEventListener('click', () => {
-                navIcons.forEach(n => n.style.opacity = '0.4');
-                nav.style.opacity = '1';
-            });
-        });
-    }
-
-    // === 表单操作逻辑（注入 Token） ===
-    drawerClose.addEventListener('click', () => detailDrawer.style.display = 'none');
-
+    // 辅助函数：清空表单
     const clearForm = () => {
         ['input-name', 'input-price', 'input-category2', 'input-notes'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('input-category1').selectedIndex = 0;
         document.getElementById('input-status').selectedIndex = 0;
     };
 
+    // 点击加号：进入“新增”模式
     btnAdd.addEventListener('click', () => {
-        if (!userToken) { alert("无访问权限，请刷新页面输入密钥。"); return; }
-        currentActiveRowId = null;
+        currentActiveRowId = null; // 清除行号，代表这是新增操作
         document.getElementById('modal-title').innerText = '录入新资产';
         clearForm();
         inputDate.valueAsDate = new Date();
@@ -657,48 +93,48 @@
 
     btnCancel.addEventListener('click', () => addModal.style.display = 'none');
 
+    // 抽屉内点击编辑：进入“修改”模式，回填数据
     document.getElementById('btn-edit').addEventListener('click', () => {
         detailDrawer.style.display = 'none';
         document.getElementById('modal-title').innerText = '修改资产信息';
-
-        document.getElementById('input-name').value = currentActiveItem['物品名称'] || '';
-        document.getElementById('input-price').value = currentActiveItem['购入价格'] || '';
-
-        if(currentActiveItem['购入日期']) {
-            const rawDate = String(currentActiveItem['购入日期']).replace(/\//g, '-').split('T')[0];
-            document.getElementById('input-date').value = rawDate;
-        }
-
+        
+        document.getElementById('input-name').value = currentActiveItem['物品名称'];
+        document.getElementById('input-price').value = currentActiveItem['购入价格'];
+        // 格式化日期回填
+        const rawDate = currentActiveItem['购入日期'].replace(/\//g, '-').split('T')[0];
+        document.getElementById('input-date').value = rawDate;
         document.getElementById('input-category1').value = currentActiveItem['一级分类'] || '电子设备';
         document.getElementById('input-status').value = currentActiveItem['当前状态'] || '服役中';
         document.getElementById('input-category2').value = currentActiveItem['二级分类'] || '';
         document.getElementById('input-notes').value = currentActiveItem['备注'] || '';
-
+        
         addModal.style.display = 'flex';
     });
 
+    // 抽屉内点击删除
     document.getElementById('btn-delete').addEventListener('click', async () => {
         if (!confirm(`确定要删除 [${currentActiveItem['物品名称']}] 吗？此操作无法撤销。`)) return;
+        
         detailDrawer.style.display = 'none';
+        
+        const payload = { action: "delete", rowId: currentActiveRowId };
+        
+        // 先在本地缓存中乐观删除，实现秒级响应
+        const oldCache = JSON.parse(localStorage.getItem(CACHE_KEY) || '[]');
+        const newCache = oldCache.filter(item => item._rowIndex !== currentActiveRowId);
+        localStorage.setItem(CACHE_KEY, JSON.stringify(newCache));
+        renderItems(newCache);
+        calculateOverview(newCache);
 
-        // 附带 Token 发送请求
-        const payload = { action: "delete", rowId: currentActiveRowId, token: userToken };
-
-        globalData = globalData.filter(item => item._rowIndex !== currentActiveRowId);
-        localStorage.setItem(CACHE_KEY, JSON.stringify(globalData));
-        renderItems(globalData);
-        calculateOverview(globalData);
-
+        // 发送给云端
         fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify(payload)
-        }).then(res => res.json()).then(result => {
-             if(result.error) { alert("删除失败：" + result.message); loadData(); }
-             else { loadData(); }
-        });
+        }).then(() => loadData()); // 异步对齐云端数据
     });
 
+    // 统一处理保存（包含新增和修改）
     btnSubmit.addEventListener('click', async () => {
         const name = document.getElementById('input-name').value;
         const price = document.getElementById('input-price').value;
@@ -718,35 +154,35 @@
         btnSubmit.disabled = true;
 
         const payloadData = {
-            "物品名称": name, "购入日期": date, "购入价格": price,
-            "当前状态": status, "一级分类": cat1, "二级分类": cat2, "备注": notes
+            "物品名称": name,
+            "购入日期": date,
+            "购入价格": price,
+            "当前状态": status,
+            "一级分类": cat1,
+            "二级分类": cat2,
+            "备注": notes
         };
 
-        // 附带 Token 发送请求
+        // 判断是新增还是修改
         const payload = {
             action: currentActiveRowId ? "edit" : "add",
             rowId: currentActiveRowId,
-            data: payloadData,
-            token: userToken
+            data: payloadData
         };
 
         try {
             const response = await fetch(API_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
                 body: JSON.stringify(payload)
             });
             const result = await response.json();
-
+            
             if (result.status === 'success') {
                 addModal.style.display = 'none';
                 btnSubmit.innerText = originalText;
                 btnSubmit.disabled = false;
-                loadData();
-            } else {
-                alert("写入失败：" + (result.message || "未知错误"));
-                btnSubmit.innerText = originalText;
-                btnSubmit.disabled = false;
+                loadData(); // 重新拉取并更新缓存
             }
         } catch (error) {
             alert('写入失败，请检查网络设置。');
@@ -754,12 +190,3 @@
             btnSubmit.disabled = false;
         }
     });
-
-    window.onload = () => {
-        bindEvents();
-        loadData();
-    };
-</script>
-
-</body>
-</html>
